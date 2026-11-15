@@ -218,6 +218,29 @@ app.get("/favicon.ico", () => servePngIcon(getFaviconPng()));
 app.get("/favicon.png", () => servePngIcon(getFaviconPng()));
 app.get("/apple-touch-icon.png", () => servePngIcon(getAppleTouchIconPng()));
 
+function decodeBasicEntities(text: string): string {
+  return text
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&#(\d+);/g, (raw, dec) => {
+      const code = Number(dec);
+      return code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : raw;
+    })
+    .replace(/&#x([0-9a-f]+);/gi, (raw, hex) => {
+      const code = parseInt(hex, 16);
+      return code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : raw;
+    });
+}
+
+function extractHtmlTitle(html: string): string {
+  const match = html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
+  if (!match) return "";
+  return decodeBasicEntities(match[1]).replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
 async function handleUpload(c: Context<{ Bindings: Bindings }>): Promise<Response> {
   let body: {
     content?: unknown;
@@ -276,8 +299,9 @@ async function handleUpload(c: Context<{ Bindings: Bindings }>): Promise<Respons
     ).toISOString();
   }
 
-  const title =
+  const explicitTitle =
     typeof body.title === "string" ? body.title.trim().slice(0, 200) : "";
+  const title = explicitTitle || extractHtmlTitle(body.content);
 
   const id = crypto.randomUUID();
   const key = `${visibility}/${id}`;

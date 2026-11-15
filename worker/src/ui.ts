@@ -215,23 +215,18 @@ export function renderUploadUi(): string {
   <main class="container">
     <div class="topbar">
       <h1>htmlshare</h1>
-      <a class="nav-link" href="/private">非公開一覧を見る →</a>
+      <a class="nav-link" href="/private">一覧を見る →</a>
     </div>
     <p class="subtitle">HTML をアップロードして共有 URL を発行します（最大 5MB / 限定公開は 1〜90 日、非公開は無期限）。</p>
 
     <form id="upload-form">
-      <div class="field">
-        <label for="visibility">公開範囲</label>
-        <select id="visibility">
-          <option value="public">限定公開（URL を知る全員が閲覧可能 / 最大 90 日で削除）</option>
-          <option value="private">非公開（/private/* — Google ログイン限定・無期限・一覧あり）</option>
-        </select>
-      </div>
-
       <div class="row">
         <div class="field">
-          <label for="title">タイトル（任意）</label>
-          <input id="title" type="text" maxlength="200" placeholder="例: 試験対策シミュレーター" />
+          <label for="visibility">公開範囲</label>
+          <select id="visibility">
+            <option value="public">限定公開（URL を知る全員が閲覧可能 / 最大 90 日で削除）</option>
+            <option value="private">非公開（/private/* — Google ログイン限定・無期限・一覧あり）</option>
+          </select>
         </div>
         <div class="field">
           <label for="expires-days">有効期限（日）</label>
@@ -256,13 +251,13 @@ export function renderUploadUi(): string {
   <script>
     try { localStorage.removeItem("htmlshare_api_key"); } catch {}
     const visibilityInput = document.getElementById("visibility");
-    const titleInput = document.getElementById("title");
     const expiresInput = document.getElementById("expires-days");
     const fileInput = document.getElementById("file-input");
     const contentInput = document.getElementById("content");
     const form = document.getElementById("upload-form");
     const submitBtn = document.getElementById("submit-btn");
     const resultEl = document.getElementById("result");
+    let fallbackFileTitle = "";
 
     function syncVisibility() {
       const isPrivate = visibilityInput.value === "private";
@@ -271,13 +266,24 @@ export function renderUploadUi(): string {
     visibilityInput.addEventListener("change", syncVisibility);
     syncVisibility();
 
+    function hasHtmlTitle(html) {
+      try {
+        const doc = new DOMParser().parseFromString(html, "text/html");
+        return Boolean((doc.title || "").trim());
+      } catch {
+        return false;
+      }
+    }
+
     fileInput.addEventListener("change", async (e) => {
       const file = e.target.files?.[0];
       if (!file) return;
       contentInput.value = await file.text();
-      if (!titleInput.value.trim()) {
-        titleInput.value = file.name.replace(/\\.(html?|HTML?)$/, "");
-      }
+      fallbackFileTitle = file.name.replace(/\\.(html?|HTML?)$/, "");
+    });
+
+    contentInput.addEventListener("input", () => {
+      fallbackFileTitle = "";
     });
 
     function showError(message) {
@@ -330,7 +336,7 @@ export function renderUploadUi(): string {
       const visibility = visibilityInput.value;
       const payload = {
         content,
-        title: titleInput.value.trim() || undefined,
+        title: !hasHtmlTitle(content) && fallbackFileTitle ? fallbackFileTitle : undefined,
         visibility,
       };
       if (visibility === "public") {
