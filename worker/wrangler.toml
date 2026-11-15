@@ -1,0 +1,14 @@
+name = "htmlshare"
+main = "src/index.ts"
+compatibility_date = "2025-04-01"
+
+routes = [
+  { pattern = "share.yutamoty.com", custom_domain = true }
+]
+
+[vars]
+BASE_URL = "https://share.yutamoty.com"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "htmlshare"
