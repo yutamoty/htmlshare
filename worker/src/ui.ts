@@ -473,7 +473,7 @@ export function renderPrivateListUi(items: PrivateItem[]): string {
   <main class="container">
     <div class="topbar">
       <h1>非公開 HTML 一覧</h1>
-      <a class="nav-link" href="/">← アップロード画面へ</a>
+      <a class="nav-link" href="/private/upload">＋ 新規アップロード</a>
     </div>
     <p class="subtitle">無期限で保存されている自分専用の HTML 一覧です（${items.length} 件）。</p>
     ${rows}

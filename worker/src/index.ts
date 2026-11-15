@@ -109,8 +109,15 @@ async function serveHtml(
 }
 
 app.get("/", (c) => {
+  return c.html(renderNotFound(), 404, {
+    "X-Robots-Tag": "noindex, nofollow",
+  });
+});
+
+app.get("/private/upload", (c) => {
   return c.html(renderUploadUi(), 200, {
     "X-Robots-Tag": "noindex, nofollow",
+    "Cache-Control": "private, no-store",
   });
 });
 
