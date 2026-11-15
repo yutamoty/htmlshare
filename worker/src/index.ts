@@ -1,5 +1,5 @@
 import { Hono, type Context } from "hono";
-import { renderPrivateListUi, renderUploadUi, type PrivateItem } from "./ui";
+import { renderPrivateListUi, renderUploadUi, type ShareListItem } from "./ui";
 
 type Bindings = {
   BUCKET: R2Bucket;
@@ -330,19 +330,47 @@ app.delete("/api/items/:visibility/:id", async (c) => {
 
 app.get("/private", async (c) => {
   const baseUrl = getBaseUrl(c);
-  const listed = await listBucketItems(c.env.BUCKET, "private", baseUrl);
-  listed.sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
-  const items: PrivateItem[] = listed.map((item) => ({
-    id: item.id,
-    title: item.title,
-    createdAt: item.created_at,
-    size: item.size,
-  }));
+  const [privateListed, publicListed] = await Promise.all([
+    listBucketItems(c.env.BUCKET, "private", baseUrl),
+    listBucketItems(c.env.BUCKET, "public", baseUrl),
+  ]);
 
-  return c.html(renderPrivateListUi(items), 200, {
-    "X-Robots-Tag": "noindex, nofollow",
-    "Cache-Control": "private, no-store",
-  });
+  const toUiItems = (
+    items: Awaited<ReturnType<typeof listBucketItems>>,
+  ): ShareListItem[] =>
+    items
+      .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
+      .map((item) => ({
+        id: item.id,
+        visibility: item.visibility,
+        title: item.title,
+        url: item.url,
+        createdAt: item.created_at,
+        expiresAt: item.expires_at,
+        size: item.size,
+      }));
+
+  return c.html(
+    renderPrivateListUi(toUiItems(privateListed), toUiItems(publicListed)),
+    200,
+    {
+      "X-Robots-Tag": "noindex, nofollow",
+      "Cache-Control": "private, no-store",
+    },
+  );
+});
+
+app.delete("/private/items/:visibility/:id", async (c) => {
+  const visibility = c.req.param("visibility");
+  const id = c.req.param("id");
+  if (visibility !== "public" && visibility !== "private") {
+    return c.json({ error: 'visibility must be "public" or "private"' }, 400);
+  }
+  if (!UUID_V4_RE.test(id)) {
+    return c.json({ error: "Invalid ID" }, 400);
+  }
+  await c.env.BUCKET.delete(`${visibility}/${id}`);
+  return c.json({ deleted: `${visibility}/${id}` });
 });
 
 app.get("/private/:id", (c) => serveHtml(c, c.req.param("id"), "private"));

@@ -1,7 +1,10 @@
-export interface PrivateItem {
+export interface ShareListItem {
   id: string;
+  visibility: "public" | "private";
   title: string;
+  url: string;
   createdAt: string;
+  expiresAt: string | null;
   size: number;
 }
 
@@ -385,10 +388,14 @@ export function renderUploadUi(): string {
 </html>`;
 }
 
-export function renderPrivateListUi(items: PrivateItem[]): string {
-  const rows =
+function renderItemSection(
+  heading: string,
+  emptyText: string,
+  items: ShareListItem[],
+): string {
+  const body =
     items.length === 0
-      ? `<p class="empty">非公開 HTML はまだありません。</p>`
+      ? `<p class="empty">${escapeHtml(emptyText)}</p>`
       : `<ul class="item-list">
           ${items
             .map((item) => {
@@ -397,30 +404,51 @@ export function renderPrivateListUi(items: PrivateItem[]): string {
               const dateText = item.createdAt
                 ? escapeHtml(new Date(item.createdAt).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }))
                 : "日時不明";
+              const expiresText = item.expiresAt
+                ? ` ・ 期限 ${escapeHtml(new Date(item.expiresAt).toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" }))}`
+                : "";
               return `<li class="item" data-id="${escapeHtml(item.id)}">
                 <div class="item-main">
-                  <a class="item-title" href="/private/${escapeHtml(item.id)}">${title}</a>
-                  <div class="item-meta">${dateText} ・ 約 ${kb} KB</div>
+                  <a class="item-title" href="${escapeHtml(item.url)}">${title}</a>
+                  <div class="item-meta">${dateText}${expiresText} ・ 約 ${kb} KB</div>
                 </div>
-                <button class="btn-delete" type="button" onclick="deleteItem('${escapeHtml(item.id)}', this)">削除</button>
+                <button class="btn-delete" type="button" onclick="deleteItem('${item.visibility}', '${escapeHtml(item.id)}', this)">削除</button>
               </li>`;
             })
             .join("")}
         </ul>`;
 
+  return `<section class="section">
+    <h2 class="section-title">${escapeHtml(heading)}（${items.length} 件）</h2>
+    ${body}
+  </section>`;
+}
+
+export function renderPrivateListUi(
+  privateItems: ShareListItem[],
+  publicItems: ShareListItem[],
+): string {
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="robots" content="noindex, nofollow" />
-  <title>htmlshare - 非公開一覧</title>
+  <title>htmlshare - 一覧管理</title>
   <style>
     ${SHARED_STYLES}
+    .section { margin-top: 24px; }
+    .section-title {
+      margin: 0 0 12px;
+      font-size: 1.05rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 6px;
+    }
     .empty {
       color: var(--muted);
-      padding: 24px 0;
+      padding: 16px 0;
       text-align: center;
+      font-size: 0.9rem;
     }
     .item-list {
       list-style: none;
@@ -472,19 +500,20 @@ export function renderPrivateListUi(items: PrivateItem[]): string {
 <body>
   <main class="container">
     <div class="topbar">
-      <h1>非公開 HTML 一覧</h1>
+      <h1>htmlshare 一覧管理</h1>
       <a class="nav-link" href="/private/upload">＋ 新規アップロード</a>
     </div>
-    <p class="subtitle">無期限で保存されている自分専用の HTML 一覧です（${items.length} 件）。</p>
-    ${rows}
+    <p class="subtitle">非公開（無期限）と限定公開（期限付き）の HTML を確認・削除できます。</p>
+    ${renderItemSection("非公開 HTML", "非公開 HTML はまだありません。", privateItems)}
+    ${renderItemSection("限定公開 HTML", "限定公開中の HTML はありません。", publicItems)}
   </main>
 
   <script>
-    async function deleteItem(id, btn) {
-      if (!confirm("この非公開 HTML を削除しますか？")) return;
+    async function deleteItem(visibility, id, btn) {
+      if (!confirm("この HTML を削除しますか？")) return;
       btn.disabled = true;
       try {
-        const res = await fetch("/private/" + encodeURIComponent(id), { method: "DELETE" });
+        const res = await fetch("/private/items/" + encodeURIComponent(visibility) + "/" + encodeURIComponent(id), { method: "DELETE" });
         if (!res.ok) {
           alert("削除に失敗しました (" + res.status + ")");
           btn.disabled = false;
