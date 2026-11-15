@@ -219,15 +219,6 @@ export function renderUploadUi(): string {
 
     <form id="upload-form">
       <div class="field">
-        <label for="api-key">API Key</label>
-        <input id="api-key" type="password" autocomplete="current-password" required placeholder="Bearer トークン" />
-        <label class="inline-check">
-          <input id="save-key" type="checkbox" />
-          このブラウザの localStorage に API Key を保存する
-        </label>
-      </div>
-
-      <div class="field">
         <label for="visibility">公開範囲</label>
         <select id="visibility">
           <option value="public">限定公開（URL を知る全員が閲覧可能 / 最大 90 日で削除）</option>
@@ -261,9 +252,7 @@ export function renderUploadUi(): string {
   </main>
 
   <script>
-    const STORAGE_KEY = "htmlshare_api_key";
-    const apiKeyInput = document.getElementById("api-key");
-    const saveKeyCheck = document.getElementById("save-key");
+    try { localStorage.removeItem("htmlshare_api_key"); } catch {}
     const visibilityInput = document.getElementById("visibility");
     const titleInput = document.getElementById("title");
     const expiresInput = document.getElementById("expires-days");
@@ -272,12 +261,6 @@ export function renderUploadUi(): string {
     const form = document.getElementById("upload-form");
     const submitBtn = document.getElementById("submit-btn");
     const resultEl = document.getElementById("result");
-
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      apiKeyInput.value = saved;
-      saveKeyCheck.checked = true;
-    }
 
     function syncVisibility() {
       const isPrivate = visibilityInput.value === "private";
@@ -336,17 +319,10 @@ export function renderUploadUi(): string {
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const apiKey = apiKeyInput.value.trim();
       const content = contentInput.value;
-      if (!apiKey || !content.trim()) {
-        showError("API Key と HTML を入力してください。");
+      if (!content.trim()) {
+        showError("HTML を入力してください。");
         return;
-      }
-
-      if (saveKeyCheck.checked) {
-        localStorage.setItem(STORAGE_KEY, apiKey);
-      } else {
-        localStorage.removeItem(STORAGE_KEY);
       }
 
       const visibility = visibilityInput.value;
@@ -362,11 +338,11 @@ export function renderUploadUi(): string {
       submitBtn.disabled = true;
       submitBtn.textContent = "アップロード中...";
       try {
-        const res = await fetch("/api/upload", {
+        const res = await fetch("/private/upload", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": "Bearer " + apiKey,
+            "X-Htmlshare-Ui": "1",
           },
           body: JSON.stringify(payload),
         });
@@ -513,7 +489,10 @@ export function renderPrivateListUi(
       if (!confirm("この HTML を削除しますか？")) return;
       btn.disabled = true;
       try {
-        const res = await fetch("/private/items/" + encodeURIComponent(visibility) + "/" + encodeURIComponent(id), { method: "DELETE" });
+        const res = await fetch("/private/items/" + encodeURIComponent(visibility) + "/" + encodeURIComponent(id), {
+          method: "DELETE",
+          headers: { "X-Htmlshare-Ui": "1" },
+        });
         if (!res.ok) {
           alert("削除に失敗しました (" + res.status + ")");
           btn.disabled = false;

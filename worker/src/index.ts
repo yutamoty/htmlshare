@@ -17,28 +17,36 @@ const UUID_V4_RE =
 
 const app = new Hono<{ Bindings: Bindings }>();
 
-/** 定数時間に近い形で Bearer トークンを検証する */
-function verifyToken(expected: string, actual: string): boolean {
+/** SHA-256 ダイジェストと timingSafeEqual で定数時間比較を行う（トークン長も漏洩しない） */
+async function verifyToken(expected: string, actual: string): Promise<boolean> {
   const encoder = new TextEncoder();
-  const a = encoder.encode(expected);
-  const b = encoder.encode(actual);
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) {
-    diff |= a[i] ^ b[i];
-  }
-  return diff === 0;
+  const [aHash, bHash] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(expected)),
+    crypto.subtle.digest("SHA-256", encoder.encode(actual)),
+  ]);
+  return crypto.subtle.timingSafeEqual(aHash, bHash);
 }
 
-function authorizeApi(c: Context<{ Bindings: Bindings }>): Response | null {
+async function authorizeApi(
+  c: Context<{ Bindings: Bindings }>,
+): Promise<Response | null> {
   const configuredKey = c.env.API_KEY;
   if (!configuredKey) {
     return c.json({ error: "Server API_KEY is not configured" }, 500);
   }
   const authHeader = c.req.header("Authorization") ?? "";
   const match = authHeader.match(/^Bearer\s+(.+)$/i);
-  if (!match || !verifyToken(configuredKey, match[1].trim())) {
+  if (!match || !(await verifyToken(configuredKey, match[1].trim()))) {
     return c.json({ error: "Unauthorized" }, 401);
+  }
+  return null;
+}
+
+function verifyPrivateUiRequest(
+  c: Context<{ Bindings: Bindings }>,
+): Response | null {
+  if (c.req.header("X-Htmlshare-Ui") !== "1") {
+    return c.json({ error: "Missing X-Htmlshare-Ui header" }, 403);
   }
   return null;
 }
@@ -165,7 +173,7 @@ async function serveHtml(
   headers.set("X-Robots-Tag", "noindex, nofollow");
   headers.set(
     "Cache-Control",
-    visibility === "private" ? "private, no-store" : "private, max-age=300",
+    visibility === "private" ? "private, no-store" : "private, no-cache",
   );
 
   return new Response(object.body, {
@@ -193,10 +201,7 @@ app.get("/robots.txt", (c) => {
 
 app.get("/favicon.ico", (c) => c.body(null, 204));
 
-app.post("/api/upload", async (c) => {
-  const authError = authorizeApi(c);
-  if (authError) return authError;
-
+async function handleUpload(c: Context<{ Bindings: Bindings }>): Promise<Response> {
   let body: {
     content?: unknown;
     title?: unknown;
@@ -288,10 +293,22 @@ app.post("/api/upload", async (c) => {
     },
     201,
   );
+}
+
+app.post("/private/upload", async (c) => {
+  const uiError = verifyPrivateUiRequest(c);
+  if (uiError) return uiError;
+  return handleUpload(c);
+});
+
+app.post("/api/upload", async (c) => {
+  const authError = await authorizeApi(c);
+  if (authError) return authError;
+  return handleUpload(c);
 });
 
 app.get("/api/items", async (c) => {
-  const authError = authorizeApi(c);
+  const authError = await authorizeApi(c);
   if (authError) return authError;
 
   const filter = c.req.query("visibility");
@@ -312,7 +329,7 @@ app.get("/api/items", async (c) => {
 });
 
 app.delete("/api/items/:visibility/:id", async (c) => {
-  const authError = authorizeApi(c);
+  const authError = await authorizeApi(c);
   if (authError) return authError;
 
   const visibility = c.req.param("visibility");
@@ -361,6 +378,9 @@ app.get("/private", async (c) => {
 });
 
 app.delete("/private/items/:visibility/:id", async (c) => {
+  const uiError = verifyPrivateUiRequest(c);
+  if (uiError) return uiError;
+
   const visibility = c.req.param("visibility");
   const id = c.req.param("id");
   if (visibility !== "public" && visibility !== "private") {
@@ -374,15 +394,6 @@ app.delete("/private/items/:visibility/:id", async (c) => {
 });
 
 app.get("/private/:id", (c) => serveHtml(c, c.req.param("id"), "private"));
-
-app.delete("/private/:id", async (c) => {
-  const id = c.req.param("id");
-  if (!UUID_V4_RE.test(id)) {
-    return c.json({ error: "Invalid ID" }, 400);
-  }
-  await c.env.BUCKET.delete(`private/${id}`);
-  return c.json({ deleted: id });
-});
 
 app.get("/:id", (c) => serveHtml(c, c.req.param("id"), "public"));
 

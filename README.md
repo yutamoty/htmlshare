@@ -5,7 +5,7 @@ AI が生成した HTML やローカルの HTML ファイルをアップロー�
 ## 構成
 
 - `worker/`: Cloudflare Workers (Hono) + Cloudflare R2 による API・HTML 配信・Web UI
-- `mcp/`: MCP サーバー (`upload_html` ツール)
+- `mcp/`: MCP サーバー (`upload_html` / `list_html` / `delete_html` ツール)
 
 ## セットアップ
 
