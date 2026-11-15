@@ -1,4 +1,5 @@
 import { Hono, type Context } from "hono";
+import { getAppleTouchIconPng, getFaviconPng } from "./favicon";
 import { renderPrivateListUi, renderUploadUi, type ShareListItem } from "./ui";
 
 type Bindings = {
@@ -62,6 +63,8 @@ function renderNotFound(): string {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="robots" content="noindex, nofollow" />
+  <link rel="icon" type="image/png" href="/favicon.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <title>404 Not Found - htmlshare</title>
   <style>
     body {
@@ -199,7 +202,21 @@ app.get("/robots.txt", (c) => {
   return c.text("User-agent: *\nDisallow: /\n");
 });
 
-app.get("/favicon.ico", (c) => c.body(null, 204));
+function servePngIcon(bytes: Uint8Array): Response {
+  return new Response(bytes, {
+    status: 200,
+    headers: {
+      "Content-Type": "image/png",
+      "Content-Length": String(bytes.byteLength),
+      "X-Content-Type-Options": "nosniff",
+      "Cache-Control": "public, max-age=86400",
+    },
+  });
+}
+
+app.get("/favicon.ico", () => servePngIcon(getFaviconPng()));
+app.get("/favicon.png", () => servePngIcon(getFaviconPng()));
+app.get("/apple-touch-icon.png", () => servePngIcon(getAppleTouchIconPng()));
 
 async function handleUpload(c: Context<{ Bindings: Bindings }>): Promise<Response> {
   let body: {
