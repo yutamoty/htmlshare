@@ -30,6 +30,23 @@ function verifyToken(expected: string, actual: string): boolean {
   return diff === 0;
 }
 
+function authorizeApi(c: Context<{ Bindings: Bindings }>): Response | null {
+  const configuredKey = c.env.API_KEY;
+  if (!configuredKey) {
+    return c.json({ error: "Server API_KEY is not configured" }, 500);
+  }
+  const authHeader = c.req.header("Authorization") ?? "";
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  if (!match || !verifyToken(configuredKey, match[1].trim())) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  return null;
+}
+
+function getBaseUrl(c: Context<{ Bindings: Bindings }>): string {
+  return (c.env.BASE_URL || new URL(c.req.url).origin).replace(/\/+$/, "");
+}
+
 function renderNotFound(): string {
   return `<!DOCTYPE html>
 <html lang="ja">
@@ -59,6 +76,55 @@ function renderNotFound(): string {
   </div>
 </body>
 </html>`;
+}
+
+async function listBucketItems(
+  bucket: R2Bucket,
+  visibility: Visibility,
+  baseUrl: string,
+) {
+  const prefix = `${visibility}/`;
+  const results: Array<{
+    id: string;
+    visibility: Visibility;
+    title: string;
+    url: string;
+    created_at: string;
+    expires_at: string | null;
+    size: number;
+  }> = [];
+
+  let cursor: string | undefined;
+  do {
+    const listed = await bucket.list({
+      prefix,
+      include: ["customMetadata"],
+      cursor,
+    });
+
+    for (const obj of listed.objects) {
+      const id = obj.key.slice(prefix.length);
+      if (!UUID_V4_RE.test(id)) continue;
+      const expiresAt = obj.customMetadata?.expires_at || null;
+      if (visibility === "public" && expiresAt) {
+        const ms = Date.parse(expiresAt);
+        if (!Number.isNaN(ms) && Date.now() > ms) continue;
+      }
+      results.push({
+        id,
+        visibility,
+        title: obj.customMetadata?.title || "",
+        url: `${baseUrl}${visibility === "private" ? `/private/${id}` : `/${id}`}`,
+        created_at: obj.customMetadata?.created_at || obj.uploaded.toISOString(),
+        expires_at: expiresAt,
+        size: obj.size,
+      });
+    }
+
+    cursor = listed.truncated ? listed.cursor : undefined;
+  } while (cursor);
+
+  return results;
 }
 
 async function serveHtml(
@@ -128,16 +194,8 @@ app.get("/robots.txt", (c) => {
 app.get("/favicon.ico", (c) => c.body(null, 204));
 
 app.post("/api/upload", async (c) => {
-  const configuredKey = c.env.API_KEY;
-  if (!configuredKey) {
-    return c.json({ error: "Server API_KEY is not configured" }, 500);
-  }
-
-  const authHeader = c.req.header("Authorization") ?? "";
-  const match = authHeader.match(/^Bearer\s+(.+)$/i);
-  if (!match || !verifyToken(configuredKey, match[1].trim())) {
-    return c.json({ error: "Unauthorized" }, 401);
-  }
+  const authError = authorizeApi(c);
+  if (authError) return authError;
 
   let body: {
     content?: unknown;
@@ -219,7 +277,7 @@ app.post("/api/upload", async (c) => {
     customMetadata,
   });
 
-  const baseUrl = (c.env.BASE_URL || new URL(c.req.url).origin).replace(/\/+$/, "");
+  const baseUrl = getBaseUrl(c);
   const path = visibility === "private" ? `/private/${id}` : `/${id}`;
   return c.json(
     {
@@ -232,32 +290,54 @@ app.post("/api/upload", async (c) => {
   );
 });
 
+app.get("/api/items", async (c) => {
+  const authError = authorizeApi(c);
+  if (authError) return authError;
+
+  const filter = c.req.query("visibility");
+  if (filter !== undefined && filter !== "public" && filter !== "private") {
+    return c.json({ error: 'visibility must be "public" or "private"' }, 400);
+  }
+
+  const baseUrl = getBaseUrl(c);
+  const targets: Visibility[] = filter ? [filter] : ["private", "public"];
+  const lists = await Promise.all(
+    targets.map((v) => listBucketItems(c.env.BUCKET, v, baseUrl)),
+  );
+  const items = lists
+    .flat()
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+
+  return c.json({ items });
+});
+
+app.delete("/api/items/:visibility/:id", async (c) => {
+  const authError = authorizeApi(c);
+  if (authError) return authError;
+
+  const visibility = c.req.param("visibility");
+  const id = c.req.param("id");
+  if (visibility !== "public" && visibility !== "private") {
+    return c.json({ error: 'visibility must be "public" or "private"' }, 400);
+  }
+  if (!UUID_V4_RE.test(id)) {
+    return c.json({ error: "Invalid ID" }, 400);
+  }
+
+  await c.env.BUCKET.delete(`${visibility}/${id}`);
+  return c.json({ deleted: `${visibility}/${id}` });
+});
+
 app.get("/private", async (c) => {
-  const items: PrivateItem[] = [];
-  let cursor: string | undefined;
-
-  do {
-    const listed = await c.env.BUCKET.list({
-      prefix: "private/",
-      include: ["customMetadata"],
-      cursor,
-    });
-
-    for (const obj of listed.objects) {
-      const id = obj.key.slice("private/".length);
-      if (!UUID_V4_RE.test(id)) continue;
-      items.push({
-        id,
-        title: obj.customMetadata?.title || "",
-        createdAt: obj.customMetadata?.created_at || obj.uploaded.toISOString(),
-        size: obj.size,
-      });
-    }
-
-    cursor = listed.truncated ? listed.cursor : undefined;
-  } while (cursor);
-
-  items.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const baseUrl = getBaseUrl(c);
+  const listed = await listBucketItems(c.env.BUCKET, "private", baseUrl);
+  listed.sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+  const items: PrivateItem[] = listed.map((item) => ({
+    id: item.id,
+    title: item.title,
+    createdAt: item.created_at,
+    size: item.size,
+  }));
 
   return c.html(renderPrivateListUi(items), 200, {
     "X-Robots-Tag": "noindex, nofollow",

@@ -7,8 +7,33 @@ const API_KEY = process.env.HTMLSHARE_API_KEY || "";
 
 const server = new McpServer({
   name: "htmlshare",
-  version: "0.1.0",
+  version: "0.2.0",
 });
+
+async function callApi(path: string, init: RequestInit = {}) {
+  if (!API_KEY) {
+    return {
+      isError: true as const,
+      content: [{ type: "text" as const, text: "HTMLSHARE_API_KEY is not set." }],
+    };
+  }
+
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${API_KEY}`);
+
+  const res = await fetch(`${BASE_URL}${path}`, { ...init, headers });
+  const text = await res.text();
+  if (!res.ok) {
+    return {
+      isError: true as const,
+      content: [{ type: "text" as const, text: `Request failed (${res.status}): ${text}` }],
+    };
+  }
+
+  return {
+    content: [{ type: "text" as const, text }],
+  };
+}
 
 server.tool(
   "upload_html",
@@ -29,33 +54,38 @@ server.tool(
       .describe('Visibility: "public" (default, expires in <=90d) or "private" (under /private/*, permanent & listed)'),
   },
   async ({ content, title, expires_days, visibility }) => {
-    if (!API_KEY) {
-      return {
-        isError: true,
-        content: [{ type: "text", text: "HTMLSHARE_API_KEY is not set." }],
-      };
-    }
-
-    const res = await fetch(`${BASE_URL}/api/upload`, {
+    return callApi("/api/upload", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${API_KEY}`,
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content, title, expires_days, visibility }),
     });
+  },
+);
 
-    const text = await res.text();
-    if (!res.ok) {
-      return {
-        isError: true,
-        content: [{ type: "text", text: `Upload failed (${res.status}): ${text}` }],
-      };
-    }
+server.tool(
+  "list_html",
+  "List uploaded HTML items in htmlshare.",
+  {
+    visibility: z
+      .enum(["public", "private"])
+      .optional()
+      .describe("Optional filter by visibility"),
+  },
+  async ({ visibility }) => {
+    const query = visibility ? `?visibility=${encodeURIComponent(visibility)}` : "";
+    return callApi(`/api/items${query}`, { method: "GET" });
+  },
+);
 
-    return {
-      content: [{ type: "text", text }],
-    };
+server.tool(
+  "delete_html",
+  "Delete an uploaded HTML item from htmlshare by visibility and UUID.",
+  {
+    visibility: z.enum(["public", "private"]).describe("Item visibility"),
+    id: z.string().uuid().describe("UUID of the item to delete"),
+  },
+  async ({ visibility, id }) => {
+    return callApi(`/api/items/${visibility}/${id}`, { method: "DELETE" });
   },
 );
 
