@@ -174,6 +174,7 @@ async function serveHtml(
   headers.set("Content-Type", "text/html; charset=utf-8");
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("X-Robots-Tag", "noindex, nofollow");
+  headers.set("Referrer-Policy", "no-referrer");
   headers.set(
     "Cache-Control",
     visibility === "private" ? "private, no-store" : "private, no-cache",
@@ -194,6 +195,7 @@ app.get("/", (c) => {
 app.get("/private/upload", (c) => {
   return c.html(renderUploadUi(), 200, {
     "X-Robots-Tag": "noindex, nofollow",
+    "Referrer-Policy": "no-referrer",
     "Cache-Control": "private, no-store",
   });
 });
@@ -413,6 +415,7 @@ app.get("/private", async (c) => {
     200,
     {
       "X-Robots-Tag": "noindex, nofollow",
+      "Referrer-Policy": "no-referrer",
       "Cache-Control": "private, no-store",
     },
   );
